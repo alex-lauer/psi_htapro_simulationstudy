@@ -8,10 +8,9 @@ library(purrr)
 #### Fixed parameters ####
 
 mu_P0   <- 70          # mean baseline PRO
-sd_P0   <- 20          # sd baseline PRO
 beta0   <- 0           # intercept
 beta2   <- 0           # no baseline treatment offset
-beta4   <- 2/70        # baseline-PRO effect on slope
+beta4   <- 0.01        # baseline-PRO effect on slope
 MCID    <- -10         # PRO decline target (MCID threshold)
 
 #### Change from baseline: CfB(t) = β0 + β1*t + β2*Trt + β3*t*Trt + β4*P0
@@ -59,4 +58,6 @@ scenario_table <- tibble(
   select(scenario, t_ctrl, t_trt, beta1, beta3)
 
 scenario_table
+
+saveRDS(scenario_table, file = "scenario_table.rds")
 
