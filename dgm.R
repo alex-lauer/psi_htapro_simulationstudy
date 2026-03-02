@@ -228,10 +228,4 @@ sim_out <- purrr::map(
 
 names(sim_out) <- scenario_names
 
-# ---- (Optional) Save for later analysis ----
-# saveRDS(sim_out, "simulated_pro_datasets.rds")
-
-# ---- (Optional) Example: Extract a dataset for analysis ----
-# first_long <- sim_out$BEFORE[[1]]$long
-# head(first_long)
-
+saveRDS(sim_out, "simulated_pro_datasets.rds")
