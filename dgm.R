@@ -41,11 +41,19 @@ compute_PD <- function(df_patients) {
         rexp(n(), rate = lambda_control),
         rexp(n(), rate = lambda_treatment)
       ),
-      PD_event_week = sapply(PD_time, function(t) {
+      # map PD_time to next visit time
+      PD_event_week_raw = sapply(PD_time, function(t) {
         w <- weeks[weeks >= t]
         if (length(w) == 0) NA_integer_ else w[1]
       }),
-      PD_status = ifelse(!is.na(PD_event_week), 1L, 0L)  # 1 = event
+
+      # PD_status = 1 if PD observed, 0 if no PD event
+      PD_status = ifelse(is.na(PD_event_week_raw), 0L, 1L),
+
+      # if PD_status == 0 -> PD at administrative censoring = 153
+      PD_event_week = ifelse(PD_status == 1,
+                             PD_event_week_raw,
+                             max(weeks))   # 153
     ) %>%
     select(patient, arm, PD_time, PD_event_week, PD_status)
 }
@@ -82,10 +90,22 @@ collection_scenarios <- function(long_df, pro_ev_full, pd_tbl) {
   # For patients who had a PD event - keep weeks up until PD event.
   long_stop <- long_df %>%
     left_join(pd_tbl, by = c("patient", "arm")) %>%
-    filter(is.na(PD_event_week) | week <= PD_event_week)
+    filter(PD_status == 0 | week <= PD_event_week)
 
   # Compute PRO events until PD event
   pro_ev_stop <- compute_PRO_event(long_stop)
+
+  # Censoring if no PRO event happened
+  pro_ev_stop <- pro_ev_stop %>%
+    left_join(pd_tbl %>% select(patient, PD_event_week), by="patient") %>%
+    mutate(
+      PRO_event_week = ifelse(
+        PRO_status == 1,
+        PRO_event_week,
+        PD_event_week  # censor at progression
+      )
+    ) %>%
+    select(-PD_event_week)
 
   stop <- long_df %>%
     distinct(patient, arm) %>%
@@ -128,6 +148,22 @@ collection_scenarios <- function(long_df, pro_ev_full, pd_tbl) {
 
   # Recompute PRO event on the thinned schedule (status = 1 event, 0 no event)
   pro_reduced_ev <- compute_PRO_event(long_reduced)
+
+  # Censor at last observed PRO week if PRO event never happened
+  last_weeks_reduced <- long_reduced %>%
+    group_by(patient) %>%
+    summarise(last_week_reduced = max(week), .groups="drop")
+
+  pro_reduced_ev <- pro_reduced_ev %>%
+    left_join(last_weeks_reduced, by="patient") %>%
+    mutate(
+      PRO_event_week = ifelse(
+        PRO_status == 1,
+        PRO_event_week,
+        last_week_reduced   # censor at last reduced-visit
+      )
+    ) %>%
+    select(-last_week_reduced)
 
   # Patient-level 'reduced' dataset (merge PRO and PD event variables)
   reduced <- long_df %>%
@@ -229,6 +265,14 @@ simulate <- function(beta1, beta3, seed) {
 
   # PRO event for FULL scenario
   pro_ev_full <- compute_PRO_event(pro_long)
+
+  # Censor at final visit if no PRO event happened
+  pro_ev_full <- pro_ev_full %>%
+    mutate(
+      PRO_event_week = ifelse(
+        PRO_status == 1,
+        PRO_event_week,
+        153L))
 
   # Build data-collection scenario versions
   collections <- collection_scenarios(long_df = pro_long,

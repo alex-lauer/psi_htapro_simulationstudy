@@ -3,9 +3,98 @@
 library(dplyr)
 library(ggplot2)
 library(tidyr)
+library(survminer)
 
 #Load analysis results
 analysis_results <- readRDS("analysis_results.rds")
+
+
+# Check for CM curve for 1 scenario
+
+dat_check <- sim_out[["AFTER"]][[1]][["stop"]]
+
+surv_obj <- Surv(dat_check$PRO_event_week, dat_check$PRO_status)
+
+fit_2 <- survfit(surv_obj ~ arm, data = dat_check)
+
+ggsurvplot(
+  fit_2,
+  data = dat_check,
+  risk.table = TRUE,
+  conf.int = TRUE,
+  xlab = "Weeks",
+  ylab = "PRO progression-free survival probability",
+  title = "Kaplan–Meier Curve for PRO",
+  legend.title = "Arm",
+  legend.labs = c("Control", "Treatment")
+)
+
+cox_fit <- coxph(
+  Surv(PRO_event_week, PRO_status) ~ arm,
+  data = dat_check
+)
+
+HR <- exp(coef(cox_fit))
+CI <- exp(confint(cox_fit))
+
+fit <- survfit(
+  Surv(PRO_event_week, PRO_status) ~ arm,
+  data = dat_check
+)
+
+median_ctrl <- summary(fit)$table["arm=control", "median"]
+median_trt  <- summary(fit)$table["arm=treatment", "median"]
+tibble(
+  HR        = HR,
+  median_ctrl  = median_ctrl,
+  median_trt   = median_trt
+)
+
+
+
+# Check for KM curve for PD
+
+# Build survival object for PD
+surv_pd <- Surv(dat_check$PD_event_week, dat_check$PD_status)
+
+# Fit Kaplan–Meier curve
+fit_pd <- survfit(surv_pd ~ arm, data = dat_check)
+
+# Plot
+ggsurvplot(
+  fit_pd,
+  data = dat_check,
+  risk.table = TRUE,
+  conf.int = TRUE,
+  xlab = "Weeks",
+  ylab = "PD-free survival probability",
+  title = "Kaplan–Meier Curve for PD (Scenario = AFTER, Collection = STOP)",
+  legend.title = "Arm",
+  legend.labs = c("Control", "Treatment")
+)
+
+cox_pd <- coxph(
+  Surv(PD_event_week, PD_status) ~ arm,
+  data = dat_check
+)
+
+HR <- exp(coef(cox_pd))
+CI <- exp(confint(cox_pd))
+
+sf <- summary(
+  survfit(Surv(PD_event_week, PD_status) ~ arm, data = dat_check)
+)
+
+median_ctrl <- sf$table["arm=control",   "median"]
+median_trt  <- sf$table["arm=treatment", "median"]
+
+tibble(
+  HR_PD        = HR,
+  median_ctrl  = median_ctrl,
+  median_trt   = median_trt
+)
+
+
 
 #### HR across scenarios ####
 HR <- analysis_results %>%
@@ -17,13 +106,6 @@ HR <- analysis_results %>%
   # Geometric mean - convert HR to a log scale before calculating mean
   summarise(HR_mean = exp(mean(log(HR), na.rm = TRUE)),
 
-            # # standard error on the log scale
-            # logHR_se = sd(log(HR), na.rm = TRUE) / sqrt(sum(!is.na(HR))),
-            #
-            # # confidence interval for mean of log(HR), then exponentiate
-            # CI_lower = exp(mean(log(HR), na.rm = TRUE) - 1.96 * logHR_se),
-            # CI_upper = exp(mean(log(HR), na.rm = TRUE) + 1.96 * logHR_se),
-
             # 95% percentile interval for HR distribution
             p2.5  = quantile(HR, 0.025, na.rm = TRUE),
             p97.5 = quantile(HR, 0.975, na.rm = TRUE),
@@ -33,23 +115,20 @@ HR <- analysis_results %>%
             median_ctrl_mean = mean(median_ctrl, na.rm = TRUE),
             median_trt_mean  = mean(median_trt,  na.rm = TRUE),
 
-            # Average hazards per arm across simulations
-            hazard_ctrl_mean = mean(hazard_ctrl, na.rm = TRUE),
-            hazard_trt_mean  = mean(hazard_trt,  na.rm = TRUE),
-
             .groups = "drop") %>%
   mutate(median_diff = median_trt_mean - median_ctrl_mean) %>%
-  select(scenario, collection, HR_mean, p2.5, p97.5, hazard_ctrl_mean, hazard_trt_mean, median_ctrl_mean, median_trt_mean, median_diff)
+  mutate(line_id = paste(scenario, collection, sep = " • "))
+ # select(scenario, collection, HR_mean, p2.5, p97.5, median_ctrl_mean, median_trt_mean, median_diff)
 
 
 # Plot for geometric mean HR with 2.5–97.5% percentile interval
 ggplot(HR,
        aes(x = HR_mean,
-           y = interaction(scenario, collection, sep = " • "),
+           y = line_id,
            color = collection)) +
   geom_segment(aes(x = p2.5, xend = p97.5,
-                   yend = interaction(scenario, collection, sep = " • ")),
-               linewidth = 1.2) +
+                   yend = line_id),
+               linewidth = 1.1) +
   geom_point(size = 3) +
   geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
   labs(
@@ -60,7 +139,7 @@ ggplot(HR,
   theme_bw() +
   theme(
     legend.position = "bottom",
-    axis.text.y = element_text(size = 10))
+    axis.text.y = element_text(size = 9))
 
 
 
@@ -133,7 +212,9 @@ RR <- analysis_results %>%
   mutate(cutoff = recode(cutoff,
                              RR27 = "Week 27",
                              RR36 = "Week 36",
-                             RR54 = "Week 54")) %>%
+                             RR54 = "Week 54"),
+         scenario   = factor(scenario,   levels = c("BEFORE","AT","AFTER")),
+         collection = factor(collection, levels = c("full","reduced","stop"))) %>%
   group_by(scenario, collection, cutoff) %>%
   summarise(
     # Geometric mean RR - log scale
@@ -141,23 +222,25 @@ RR <- analysis_results %>%
     # Percentile interval across 200 simulations
     p2.5  = quantile(RR, 0.025, na.rm = TRUE),
     p97.5 = quantile(RR, 0.975, na.rm = TRUE),
-    .groups = "drop")
+    .groups = "drop") %>%
+  mutate(line_id = paste(scenario, collection, sep = " • "))
 
 # Wide table
-rr_wide <- RR %>%
+ rr_wide <- RR %>%
   pivot_wider(
     names_from  = cutoff,
     values_from = c(RR_mean, `p2.5`, `p97.5`)) %>%
-  arrange(scenario, collection)
+   mutate(line_id = paste(scenario, collection, sep = " • "))
+#  arrange(scenario, collection)
 
 # Plot for geometric mean RR with 2.5–97.5% percentile interval
 
 ggplot(RR,
        aes(x = RR_mean,
-           y = interaction(scenario, collection, sep = " • "),
+           y = line_id,
            color = collection)) +
   geom_segment(aes(x = p2.5, xend = p97.5,
-                   yend = interaction(scenario, collection, sep = " • ")),
+                   yend = line_id),
                linewidth = 1.2) +
   geom_point(size = 3) +
   geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
@@ -170,7 +253,7 @@ ggplot(RR,
   theme_bw() +
   theme(
     legend.position = "bottom",
-    axis.text.y = element_text(size = 10))
+    axis.text.y = element_text(size = 9))
 
 # Bias and containment for RR
 

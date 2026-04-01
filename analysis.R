@@ -14,34 +14,20 @@ collection_types <- c("full", "stop", "reduced")
 run_cox <- function(dat) {
 
   # Survival object
-  fit <- coxph(Surv(event_week, status) ~ arm, data = dat)
+  fit <- coxph(Surv(PRO_event_week, PRO_status) ~ arm, data = dat)
 
   HR <- exp(coef(fit))
 
   # Kaplan-Meier curve to get medians
-  km <- survfit(Surv(event_week, status) ~ arm, data = dat)
+  km <- survfit(Surv(PRO_event_week, PRO_status) ~ arm, data = dat)
 
   median_ctrl <- summary(km)$table["arm=control","median"]
   median_trt  <- summary(km)$table["arm=treatment","median"]
 
-  # Hazard rate per arm
-  # Baseline cumulative hazard at last event
-  basehaz <- basehaz(fit, centered = FALSE)
-
-  # Last cumulative hazard value = total hazard accumulation
-  cumhaz_total <- tail(basehaz$hazard, 1)
-
-  # control hazard = cumulative hazard
-  # treatment hazard = cumulative hazard * HR
-  hazard_ctrl <- cumhaz_total
-  hazard_trt  <- cumhaz_total * HR
-
   tibble(
     HR = HR,
     median_ctrl = median_ctrl,
-    median_trt = median_trt,
-    hazard_ctrl = hazard_ctrl,
-    hazard_trt  = hazard_trt
+    median_trt = median_trt
   )
 }
 
@@ -50,7 +36,7 @@ run_rr <- function(dat, cutoff_week) {
 
   # Define event by time cutoff
   dat2 <- dat %>%
-    mutate(event_by_cutoff = ifelse(status == 1 & event_week <= cutoff_week, 1, 0))
+    mutate(event_by_cutoff = ifelse(PRO_status == 1 & PRO_event_week <= cutoff_week, 1, 0))
 
   # Use Poisson log-link
   fit <- glm(event_by_cutoff ~ arm,
@@ -90,8 +76,6 @@ analysis_results <- map_dfr(
               sim = i,
               collection = coltype,
               HR = cox_res$HR,
-              hazard_ctrl = cox_res$hazard_ctrl,
-              hazard_trt  = cox_res$hazard_trt,
               median_ctrl = cox_res$median_ctrl,
               median_trt = cox_res$median_trt,
               RR27 = rr27,

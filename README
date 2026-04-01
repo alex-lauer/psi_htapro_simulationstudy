@@ -1,0 +1,54 @@
+# pro-simulation
+
+This folder contains the simulation code for the PRO–PFS project.
+
+## Structure (in order of use)
+
+pro-simulation/
+│
+├── parameters.R                   # Calculation of parameters β1 and β3 for PRO model (different for TIME scenarios: BEFORE, AT, AFTER)
+│
+├── scenario_table.rds             # Parameters output. A table with β1 and β3 parameters for each scenario to be used in DGM.
+│
+├── dgm.R                          # Data-generating mechanism
+│   ├── pro_generator              # - generator for expected PRO at time t (linear)
+│   ├── compute_PD                 # - generator of PD (exp) and convertion to the nearest visit week
+│   ├── compute_PRO_event          # - PRO event detection
+│   ├── collection_scenarios       # - definition of COLLECTION scenarios
+│   ├── simulate                   # - simulation function (PRO at baseline, PRO at each week + correlated errors, PD events)
+│   ├── sim_out                    # - running 200 simulations for each TIME scenario
+│
+├── simulated_pro_datasets.rds     # DM output. A list of 3 TIME scenarios (BEFORE, AT, AFTER),
+│                                  # each with 200 replication, each with 3 COLLECTION scenarios (full, stop, reduced)
+│                                  # Variables: patient, arm, PRO_status, PRO_event_week, PD_status, PD_event_week, collection
+│
+├── analysis.R                     # Analysis of simulated datasets. Analysis models:
+│   ├── run_cox                    # - Cox PH
+│   ├── run_rr                     # - Poisson log-link
+│   ├── analysis_results           # - creation of an output table
+│
+├── analysis_results.rds           # Analysis output. A table with 1,800 entries (3 TIME scenarios x 200 simulations x 3 COLLECTION scenarios)
+│                                  # - hazard ratios and median time to deterioration
+│                                  # - relative risk at weeks 27, 36, 54
+│
+├── performance.R                  # Performance measures of the analysis outputs. Summary accross all scenarios.
+│                                  # - geometric HR mean
+│                                  # - HR distribution (95% percentile interval)
+│                                  # - mean of median deterioration times for control and treatment
+│                                  # - plot for geometric HR mean with 2.5–97.5% percentile interval
+│                                  # - bias of HR means between reduced/stop and full scenarios (+plot)
+│                                  # - geometric RR means for weeks 27,36,54
+│                                  # - RR distribution (95% percentile interval)
+│                                  # - plot for geometric RR mean with 2.5–97.5% percentile interval
+│                                  # - bias of RR means between reduced/stop and full scenarios (+plot)
+│
+├── checks/                        # Validity checks for the code
+│   ├── dgm_copula/                # Alternative DGM where PFS and PRO at baseline are simulated using Copula and correlated (+ analysis and performance check)
+│   ├── dgm_with_beta5/            # Alternative DGM with beta 5 (PD indicator) in PRO model. If PD happened, the slope changes (+ analysis and performance check)
+│   ├── event_check/               # Calculation of N of events for specific scenarios
+│   ├── fixed_PD_check/            # Alternative DGM (first tried) where PFS is not simulated and PD events are fixed at weeks 36/54 for all patients (+ analysis and performance check)
+│   ├── pro_trajectory/            # Plot for individual PRO trajectories for 1 scenario (the dataset is taken from the simulate() function)
+│
+└── README                         # Explanation of project flow
+
+
