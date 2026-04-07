@@ -16,18 +16,50 @@ run_cox <- function(dat) {
   # Survival object
   fit <- coxph(Surv(PRO_event_week, PRO_status) ~ arm, data = dat)
 
-  HR <- exp(coef(fit))
+  cox_sum <- summary(fit)
 
-  # Kaplan-Meier curve to get medians
+  # Hazard ratio
+  HR <- cox_sum$conf.int["armtreatment", "exp(coef)"]
+
+  # 95% confidence interval
+  HR_lower <- cox_sum$conf.int["armtreatment", "lower .95"]
+  HR_upper <- cox_sum$conf.int["armtreatment", "upper .95"]
+
+  # Kaplan-Meier curve to get medians and N of events
   km <- survfit(Surv(PRO_event_week, PRO_status) ~ arm, data = dat)
 
-  median_ctrl <- summary(km)$table["arm=control","median"]
-  median_trt  <- summary(km)$table["arm=treatment","median"]
+  km_tbl <- as.data.frame(summary(km)$table)
+
+  median_ctrl <- km_tbl["arm=control", "median"]
+  median_trt  <- km_tbl["arm=treatment", "median"]
+
+  median_ctrl_L <- km_tbl["arm=control", "0.95LCL"]
+  median_ctrl_U <- km_tbl["arm=control", "0.95UCL"]
+
+  median_trt_L  <- km_tbl["arm=treatment", "0.95LCL"]
+  median_trt_U  <- km_tbl["arm=treatment", "0.95UCL"]
+
+  # Number of events FROM KM fit
+  n_events_ctrl <- km_tbl["arm=control", "events"]
+  n_events_trt  <- km_tbl["arm=treatment", "events"]
 
   tibble(
-    HR = HR,
-    median_ctrl = median_ctrl,
-    median_trt = median_trt
+    HR          = HR,
+    HR_lower    = HR_lower,
+    HR_upper    = HR_upper,
+
+    n_events_ctrl = n_events_ctrl,
+    n_events_trt  = n_events_trt,
+
+    median_ctrl  = median_ctrl,
+    median_ctrl_L = median_ctrl_L,
+    median_ctrl_U = median_ctrl_U,
+
+    median_trt   = median_trt,
+    median_trt_L  = median_trt_L,
+    median_trt_U  = median_trt_U,
+
+    median_diff = median_trt - median_ctrl
   )
 }
 
@@ -43,8 +75,42 @@ run_rr <- function(dat, cutoff_week) {
              family = poisson(link = "log"),
              data = dat2)
 
-  tibble(RR = exp(coef(fit)["armtreatment"]))
+  coefs <- summary(fit)$coefficients
 
+  # RR and 95% CI
+  beta <- coefs["armtreatment", "Estimate"]
+  se   <- coefs["armtreatment", "Std. Error"]
+
+  RR <- exp(beta)
+
+  z <- qnorm(1 - 0.05 / 2)
+  RR_lower <- exp(beta - z * se)
+  RR_upper <- exp(beta + z * se)
+
+  # Event counts by arm (BY CUTOFF)
+  events_tbl <- dat2 %>%
+    group_by(arm) %>%
+    summarise(
+      n_events = sum(event_by_cutoff),
+      .groups = "drop"
+    )
+
+  n_events_ctrl <- events_tbl %>%
+    filter(arm == "control") %>% pull(n_events)
+
+  n_events_trt <- events_tbl %>%
+    filter(arm == "treatment") %>% pull(n_events)
+
+  tibble(
+    cutoff_week = cutoff_week,
+
+    RR        = RR,
+    RR_lower  = RR_lower,
+    RR_upper  = RR_upper,
+
+    n_events_ctrl = n_events_ctrl,
+    n_events_trt  = n_events_trt
+  )
 }
 
 
@@ -67,20 +133,55 @@ analysis_results <- map_dfr(
             cox_res <- run_cox(dat)
 
             # RR
-            rr27 <- run_rr(dat, 27)$RR
-            rr36 <- run_rr(dat, 36)$RR
-            rr54 <- run_rr(dat, 54)$RR
+            rr27 <- run_rr(dat, 27)
+            rr36 <- run_rr(dat, 36)
+            rr54 <- run_rr(dat, 54)
 
             tibble(
-              scenario = scn,
-              sim = i,
+              scenario   = scn,
+              sim        = i,
               collection = coltype,
-              HR = cox_res$HR,
-              median_ctrl = cox_res$median_ctrl,
-              median_trt = cox_res$median_trt,
-              RR27 = rr27,
-              RR36 = rr36,
-              RR54 = rr54
+
+              # HR + CI
+              HR        = cox_res$HR,
+              HR_lower  = cox_res$HR_lower,
+              HR_upper  = cox_res$HR_upper,
+
+              # KM event counts
+              n_events_ctrl = cox_res$n_events_ctrl,
+              n_events_trt  = cox_res$n_events_trt,
+
+              # Medians + CI
+              median_ctrl   = cox_res$median_ctrl,
+              median_ctrl_L = cox_res$median_ctrl_L,
+              median_ctrl_U = cox_res$median_ctrl_U,
+
+              median_trt    = cox_res$median_trt,
+              median_trt_L  = cox_res$median_trt_L,
+              median_trt_U  = cox_res$median_trt_U,
+
+              median_diff = median_trt - median_ctrl,
+
+              # RR at week 27
+              RR27    = rr27$RR,
+              RR27_L  = rr27$RR_lower,
+              RR27_U  = rr27$RR_upper,
+              events27_ctrl = rr27$n_events_ctrl,
+              events27_trt  = rr27$n_events_trt,
+
+              # RR at week 36
+              RR36    = rr36$RR,
+              RR36_L  = rr36$RR_lower,
+              RR36_U  = rr36$RR_upper,
+              events36_ctrl = rr36$n_events_ctrl,
+              events36_trt  = rr36$n_events_trt,
+
+              # RR at week 54
+              RR54    = rr54$RR,
+              RR54_L  = rr54$RR_lower,
+              RR54_U  = rr54$RR_upper,
+              events54_ctrl = rr54$n_events_ctrl,
+              events54_trt  = rr54$n_events_trt
             )
           }
         )

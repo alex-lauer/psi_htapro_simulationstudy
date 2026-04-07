@@ -20,13 +20,11 @@ pro_sigma_bl <- 20
 beta4        <- 0.01
 
 
-beta5_PD      <- -1     # when PD happens, slope declines
+beta5_PD      <- -0.1     # when PD happens, slope declines
 
 
 scenario_names <- c("BEFORE","AT","AFTER")
-#scenario_table <- readRDS("scenario_table.rds")
-#scenario_table_2 <- readRDS("calibrated_scenario_table_beta5=(-0.1).rds")
-scenario_table <- readRDS("calibrated_scenario_table_beta5=(-1).rds")
+scenario_table <- readRDS("calibrated_scenario_table_beta5=(-0.1).rds")
 
 # Visit-level covariance
 pro_vcov <- diag(sigma^2, nrow=23)
@@ -487,32 +485,6 @@ HR_summary_b5 <- HR_summary_b5 %>%
   mutate(
     line_id = paste(scenario, collection, sep = " • ")
   )
-
-# desired_order <- c(
-#   "AFTER • stop • with_beta5",
-#   "AFTER • stop • no_beta5",
-#   "AFTER • reduced • with_beta5",
-#   "AFTER • reduced • no_beta5",
-#   "AFTER • full • with_beta5",
-#   "AFTER • full • no_beta5",
-#
-#   "AT • stop • with_beta5",
-#   "AT • stop • no_beta5",
-#   "AT • reduced • with_beta5",
-#   "AT • reduced • no_beta5",
-#   "AT • full • with_beta5",
-#   "AT • full • no_beta5",
-#
-#   "BEFORE • stop • with_beta5",
-#   "BEFORE • stop • no_beta5",
-#   "BEFORE • reduced • with_beta5",
-#   "BEFORE • reduced • no_beta5",
-#   "BEFORE • full • with_beta5",
-#   "BEFORE • full • no_beta5"
-# )
-
-# HR_summary_b5 <- HR_summary_b5 %>%
-#   mutate(line_id = factor(line_id, levels = desired_order))
 
 ggplot(HR_summary_b5, aes(x = HR_mean, y = line_id, color = collection)) +
 

@@ -4,99 +4,14 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 library(survminer)
+library(stringr)
 
 #Load analysis results
 analysis_results <- readRDS("analysis_results.rds")
 
 
-# Check for CM curve for 1 scenario
-
-dat_check <- sim_out[["AFTER"]][[1]][["stop"]]
-
-surv_obj <- Surv(dat_check$PRO_event_week, dat_check$PRO_status)
-
-fit_2 <- survfit(surv_obj ~ arm, data = dat_check)
-
-ggsurvplot(
-  fit_2,
-  data = dat_check,
-  risk.table = TRUE,
-  conf.int = TRUE,
-  xlab = "Weeks",
-  ylab = "PRO progression-free survival probability",
-  title = "Kaplan–Meier Curve for PRO",
-  legend.title = "Arm",
-  legend.labs = c("Control", "Treatment")
-)
-
-cox_fit <- coxph(
-  Surv(PRO_event_week, PRO_status) ~ arm,
-  data = dat_check
-)
-
-HR <- exp(coef(cox_fit))
-CI <- exp(confint(cox_fit))
-
-fit <- survfit(
-  Surv(PRO_event_week, PRO_status) ~ arm,
-  data = dat_check
-)
-
-median_ctrl <- summary(fit)$table["arm=control", "median"]
-median_trt  <- summary(fit)$table["arm=treatment", "median"]
-tibble(
-  HR        = HR,
-  median_ctrl  = median_ctrl,
-  median_trt   = median_trt
-)
-
-
-
-# Check for KM curve for PD
-
-# Build survival object for PD
-surv_pd <- Surv(dat_check$PD_event_week, dat_check$PD_status)
-
-# Fit Kaplan–Meier curve
-fit_pd <- survfit(surv_pd ~ arm, data = dat_check)
-
-# Plot
-ggsurvplot(
-  fit_pd,
-  data = dat_check,
-  risk.table = TRUE,
-  conf.int = TRUE,
-  xlab = "Weeks",
-  ylab = "PD-free survival probability",
-  title = "Kaplan–Meier Curve for PD (Scenario = AFTER, Collection = STOP)",
-  legend.title = "Arm",
-  legend.labs = c("Control", "Treatment")
-)
-
-cox_pd <- coxph(
-  Surv(PD_event_week, PD_status) ~ arm,
-  data = dat_check
-)
-
-HR <- exp(coef(cox_pd))
-CI <- exp(confint(cox_pd))
-
-sf <- summary(
-  survfit(Surv(PD_event_week, PD_status) ~ arm, data = dat_check)
-)
-
-median_ctrl <- sf$table["arm=control",   "median"]
-median_trt  <- sf$table["arm=treatment", "median"]
-
-tibble(
-  HR_PD        = HR,
-  median_ctrl  = median_ctrl,
-  median_trt   = median_trt
-)
-
-
-
 #### HR across scenarios ####
+##### HR summary table #####
 HR <- analysis_results %>%
   mutate(
     scenario   = factor(scenario,   levels = c("BEFORE", "AT", "AFTER")),
@@ -104,35 +19,49 @@ HR <- analysis_results %>%
   )%>%
   group_by(scenario, collection) %>%
   # Geometric mean - convert HR to a log scale before calculating mean
-  summarise(HR_mean = exp(mean(log(HR), na.rm = TRUE)),
+  summarise(
+            # Geometric mean HR
+            HR_mean = exp(mean(log(HR), na.rm = TRUE)),
 
-            # 95% percentile interval for HR distribution
-            p2.5  = quantile(HR, 0.025, na.rm = TRUE),
-            p97.5 = quantile(HR, 0.975, na.rm = TRUE),
+            # Mean Cox PH Wald CI (log-scale averaging)
+            HR_CI_lower = exp(mean(log(HR_lower), na.rm = TRUE)),
+            HR_CI_upper = exp(mean(log(HR_upper), na.rm = TRUE)),
 
+            # # 95% percentile interval for HR distribution
+            # p2.5  = quantile(HR, 0.025, na.rm = TRUE),
+            # p97.5 = quantile(HR, 0.975, na.rm = TRUE),
+
+            # Event counts (from KM)
+            events_ctrl = mean(n_events_ctrl, na.rm = TRUE),
+            events_trt  = mean(n_events_trt,  na.rm = TRUE),
 
             # Mean median deterioration times across simulations
-            median_ctrl_mean = mean(median_ctrl, na.rm = TRUE),
-            median_trt_mean  = mean(median_trt,  na.rm = TRUE),
+            median_ctrl = mean(median_ctrl, na.rm = TRUE),
+            median_trt  = mean(median_trt,  na.rm = TRUE),
+            median_diff = mean(median_diff, na.rm = TRUE),
+
+            # Median CI
+            median_ctrl_L = mean(median_ctrl_L, na.rm = TRUE),
+            median_ctrl_U = mean(median_ctrl_U, na.rm = TRUE),
+            median_trt_L  = mean(median_trt_L,  na.rm = TRUE),
+            median_trt_U  = mean(median_trt_U,  na.rm = TRUE),
 
             .groups = "drop") %>%
-  mutate(median_diff = median_trt_mean - median_ctrl_mean) %>%
   mutate(line_id = paste(scenario, collection, sep = " • "))
- # select(scenario, collection, HR_mean, p2.5, p97.5, median_ctrl_mean, median_trt_mean, median_diff)
 
 
-# Plot for geometric mean HR with 2.5–97.5% percentile interval
+##### Plot for geometric mean HR with 95%CI #####
 ggplot(HR,
        aes(x = HR_mean,
            y = line_id,
            color = collection)) +
-  geom_segment(aes(x = p2.5, xend = p97.5,
+  geom_segment(aes(x = HR_CI_lower, xend = HR_CI_upper,
                    yend = line_id),
                linewidth = 1.1) +
   geom_point(size = 3) +
   geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
   labs(
-    title = "Geometric mean HR with 2.5–97.5% percentile interval",
+    title = "Geometric mean HR with 95% CI",
     x = "Hazard Ratio (HR)",
     y = "Scenario",
     color = "PRO data collection") +
@@ -143,35 +72,88 @@ ggplot(HR,
 
 
 
-# Compute bias vs full and containment of true value by percentile intervals
-# Pull full mean HR per scenario
-hr_full <- HR %>%
+##### Power for HR #####
+# Power is defined as the probability of rejecting the null hypothesis of no treatment effect
+# Rejection rule: 95%CI excludes 1.
+
+power_HR <- analysis_results %>%
+  mutate(
+    scenario   = factor(scenario,   levels = c("BEFORE", "AT", "AFTER")),
+    collection = factor(collection, levels = c("full", "reduced", "stop"))
+  )%>%
+  mutate(
+    reject = HR_upper < 1
+  ) %>%
+  group_by(scenario, collection) %>%
+  summarise(
+    power = mean(reject),
+    n_sims = n(),
+    .groups = "drop"
+  )
+
+
+##### Coverage for HR #####
+# Coverage for a scenario = probability that the CI from that scenario contains the true HR,
+# where the true HR is defined by FULL.
+
+# Define true HR from full scenario
+HR_full <-HR %>%
   filter(collection == "full") %>%
   transmute(scenario, HR_full = HR_mean)
 
+# Does the CI for each replication cover true HR?
+covered <- analysis_results %>%
+  left_join(HR_full, by = "scenario")
+
+covered <- covered %>%
+  mutate(
+    scenario   = factor(scenario,   levels = c("BEFORE", "AT", "AFTER")),
+    collection = factor(collection, levels = c("full", "reduced", "stop"))
+  )%>%
+  mutate(
+    covered = HR_lower <= HR_full & HR_upper >= HR_full
+  )
+
+coverage_HR <- covered %>%
+  group_by(scenario, collection) %>%
+  summarise(
+    coverage = mean(covered, na.rm = TRUE),
+    n_sims   = n(),
+    .groups  = "drop"
+  )
+
+# Combine power and coverage table
+
+power_coverage_HR <- power_HR %>%
+  left_join(
+    coverage_HR,
+    by = c("scenario", "collection")
+  ) %>%
+  select(-n_sims.x, -n_sims.y)
+
+
+##### Bias in HR vs full scenario ####
 # Evaluate reduced/stop vs full
-hr_eval <- HR %>%
-  left_join(hr_full, by = "scenario") %>%
+bias_HR <- HR %>%
+  left_join(HR_full, by = "scenario") %>%
   filter(collection %in% c("reduced", "stop")) %>%
   mutate(
     # Bias of HR means on a log scale
-    bias = log(HR_mean) - log(HR_full),
-    # Containment: does reduced/stop percentile interval contain the full mean HR?
-    containment = HR_full >= p2.5 & HR_full <= p97.5)
+    bias = log(HR_mean) - log(HR_full))
 
 # Plot bias for HR means
-ggplot(hr_eval, aes(
+ggplot(bias_HR, aes(
     x = bias,
-    y = paste(scenario, collection, sep = " • "),
+    y = line_id,
     color = collection)) +
   geom_segment(aes(x = 0, xend = bias,
-                   yend = paste(scenario, collection, sep = " • ")),
+                   yend = line_id),
                linewidth = 1.1) +
   geom_point(size = 3) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
   labs(
     title = "Bias in mean HR (log scale)",
-    subtitle = "Bias = log(HR_mean(reduced/stop)) − log(HR_mean(full)); positive = inflated HR vs full",
+    subtitle = "Bias = log(HR_mean(reduced/stop)) − log(HR_mean(full))",
     x = "Bias in mean HR",
     y = "Scenario",
     color = "PRO data collection") +
@@ -180,74 +162,60 @@ ggplot(hr_eval, aes(
     legend.position = "top",
     axis.text.y = element_text(size = 10))
 
-# Table for containment
-hr_eval %>%
-  select(scenario, collection, p2.5, p97.5, HR_full, containment)
-
-## Boxplot for HR
-# ggplot(analysis_results, aes(x = scenario, y = HR, fill = collection)) +
-#   geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
-#   labs(
-#     title = "Hazard Ratios Across Scenarios and Collection Designs",
-#     y = "Hazard Ratio (HR)",
-#     x = "Scenario"
-#   ) +
-#   geom_hline(yintercept = 1, linetype = "dashed", color = "grey40") +
-#   theme_bw()
-
-
-
-
 
 #### RR differences between scenarios ####
-
-
-# Build summary for RR at weeks 27, 36, and 54
-RR <- analysis_results %>%
-  select(scenario, collection, sim, RR27, RR36, RR54) %>%
+# Build long table for RR and 95% CIs at weeks 27, 36, and 54
+RR_long <- analysis_results %>%
+  select(
+    scenario, collection, sim,
+    RR27, RR27_L, RR27_U, events27_ctrl, events27_trt,
+    RR36, RR36_L, RR36_U, events36_ctrl, events36_trt,
+    RR54, RR54_L, RR54_U, events54_ctrl, events54_trt
+  ) %>%
   pivot_longer(
-    cols = starts_with("RR"),
-    names_to = "cutoff",
-    values_to = "RR") %>%
-  mutate(cutoff = recode(cutoff,
-                             RR27 = "Week 27",
-                             RR36 = "Week 36",
-                             RR54 = "Week 54"),
-         scenario   = factor(scenario,   levels = c("BEFORE","AT","AFTER")),
-         collection = factor(collection, levels = c("full","reduced","stop"))) %>%
+    cols = -c(scenario, collection, sim),
+    names_to = "name",
+    values_to = "value"
+  ) %>%
+  mutate(
+    cutoff   = as.integer(str_extract(name, "\\d+")),
+    variable = str_remove(name, "\\d+")
+  ) %>%
+  select(-name) %>%
+  pivot_wider(
+    names_from  = variable,
+    values_from = value
+  )
+
+##### Summary for RR #####
+RR_summary <- RR_long %>%
+  mutate(
+    scenario   = factor(scenario, levels = c("BEFORE", "AT", "AFTER")),
+    collection = factor(collection, levels = c("full", "reduced", "stop"))) %>%
   group_by(scenario, collection, cutoff) %>%
   summarise(
-    # Geometric mean RR - log scale
     RR_mean = exp(mean(log(RR), na.rm = TRUE)),
-    # Percentile interval across 200 simulations
-    p2.5  = quantile(RR, 0.025, na.rm = TRUE),
-    p97.5 = quantile(RR, 0.975, na.rm = TRUE),
-    .groups = "drop") %>%
-  mutate(line_id = paste(scenario, collection, sep = " • "))
+    RR_L    = exp(mean(log(RR_L), na.rm = TRUE)),
+    RR_U    = exp(mean(log(RR_U), na.rm = TRUE)),
+    events_ctrl = mean(events_ctrl),
+    events_trt  = mean(events_trt),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    line_id = paste(scenario, collection, sep = " • ")
+  )
 
-# Wide table
- rr_wide <- RR %>%
-  pivot_wider(
-    names_from  = cutoff,
-    values_from = c(RR_mean, `p2.5`, `p97.5`)) %>%
-   mutate(line_id = paste(scenario, collection, sep = " • "))
-#  arrange(scenario, collection)
 
-# Plot for geometric mean RR with 2.5–97.5% percentile interval
-
-ggplot(RR,
-       aes(x = RR_mean,
-           y = line_id,
-           color = collection)) +
-  geom_segment(aes(x = p2.5, xend = p97.5,
-                   yend = line_id),
-               linewidth = 1.2) +
+##### Plot for geometric mean RR with 95% CI #####
+ggplot(RR_summary,
+       aes(x = RR_mean, y = line_id, color = collection)) +
+  geom_segment(aes(x = RR_L, xend = RR_U, yend = line_id), linewidth = 1.2) +
   geom_point(size = 3) +
   geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
-  facet_wrap(~ cutoff, scales = "fixed") +
+  facet_wrap(~ cutoff) +
   labs(
-    title = "Geometric mean RR with 2.5–97.5% percentile interval",
-    x = "Risk Ratio (RR)",
+    title = "Geometric mean RR with 95% CI",
+    x = "RR",
     y = "Scenario",
     color = "PRO data collection") +
   theme_bw() +
@@ -255,40 +223,36 @@ ggplot(RR,
     legend.position = "bottom",
     axis.text.y = element_text(size = 9))
 
-# Bias and containment for RR
 
-# Pull FULL's geometric mean RR per scenario
-rr_full <- RR %>%
+##### Bias for RR #####
+# Define true RR = RR from the full scenario
+RR_true <- RR_summary %>%
   filter(collection == "full") %>%
-  select(scenario, cutoff, RR_full = RR_mean)
+  select(scenario, cutoff, RR_true = RR_mean)
 
-# Calculate bias and containment
-rr_eval <- RR %>%
-  left_join(rr_full, by = c("scenario", "cutoff")) %>%
+# Calculate bias
+RR_bias <- RR_summary %>%
+  left_join(RR_true, by = c("scenario", "cutoff")) %>%
   filter(collection %in% c("reduced", "stop")) %>%
   mutate(
-    # Bias of RR means on a log scale
-    bias = log(RR_mean) - log(RR_full),
-    # Containment: does reduced/stop percentile interval contain the full mean HR?
-    containment = RR_full >= p2.5 & RR_full <= p97.5)
-
+    bias = log(RR_mean) - log(RR_true)
+  )
 
 # Plot bias for RR
-
-ggplot(rr_eval,
+ggplot(RR_bias,
        aes(x = bias,
-           y = paste(scenario, collection, sep = " • "),
+           y = line_id,
            color = collection)) +
   geom_segment(aes(x = 0, xend = bias,
-                   yend = paste(scenario, collection, sep = " • ")),
+                   yend = line_id),
                linewidth = 1.1) +
   geom_point(size = 3) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
   facet_wrap(~ cutoff, scales = "fixed") +
   labs(
     title = "Bias in mean RR (log scale)",
-    subtitle = "Bias = log(RR_mean(reduced/stop)) − log(RR_mean(full)); positive = inflated RR vs full",
-    x = "Bias in mean RR (log scale)",
+    subtitle = "Bias = log(RR_mean(reduced/stop)) − log(RR_mean(full))",
+    x = "Bias in mean RR",
     y = "Scenario",
     color = "PRO data collection") +
   theme_bw() +
@@ -297,17 +261,112 @@ ggplot(rr_eval,
     axis.text.y = element_text(size = 10),
     strip.text = element_text(face = "bold"))
 
+##### Power for RR #####
+# Power = probability that the RR analysis rejects the null hypothesis RR=1
+# Rejection rule: upper 95%CI is less than 1, lower 95%CI is more than one
 
-# Table for containment
-rr_eval %>%
-  select(scenario, collection, cutoff, p2.5, p97.5, RR_full, containment)
+power_RR <- RR_long %>%
+  mutate(
+    scenario   = factor(scenario,   levels = c("BEFORE", "AT", "AFTER")),
+    collection = factor(collection, levels = c("full", "reduced", "stop")),
+    cutoff     = factor(cutoff, levels = c(27, 36, 54))
+  )%>%
+  mutate(
+    reject = (RR_U < 1)
+  ) %>%
+  group_by(scenario, collection, cutoff) %>%
+  summarise(
+    power = mean(reject, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    line_id = paste(scenario, collection, sep = " • ")
+  )
 
-# # Boxplot for RR
-# ggplot(rr_long, aes(x = scenario, y = RR, fill = collection)) +
-#   geom_boxplot(position = position_dodge(width = 0.6), outlier.alpha = 0.35) +
-#   geom_hline(yintercept = 1, linetype = "dashed", color = "grey40") +
-#   facet_wrap(~ cutoff) +
-#   labs(
-#     title = "Risk Ratios by Scenario and Collection",
-#     x = "Scenario", y = "Risk Ratio (RR)") +
-#   theme_bw()
+# Plot for power
+ggplot(
+  power_RR,
+  aes(
+    x = power,
+    y = line_id,
+    color = collection
+  )
+) +
+  geom_point(size = 3) +
+  facet_wrap(~ cutoff, scales = "fixed") +
+  geom_vline(
+    xintercept = 0.8,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  labs(
+    title = "Power for RR",
+    subtitle = "Power = P(95% CI excludes RR = 1)",
+    x = "Power",
+    y = "Scenario • Collection",
+    color = "PRO data collection"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    axis.text.y = element_text(size = 9)
+  )
+
+
+
+##### Coverage for RR #####
+# Coverage = probability that the 95% CI for RR contains the true RR (FULL scenario)
+
+# Does the CI for each replication cover true RR
+covered_RR <- RR_long %>%
+  left_join(RR_true, by = c("scenario", "cutoff")) %>%
+  mutate(
+    covered = (RR_L <= RR_true & RR_U >= RR_true)
+  )
+
+coverage_RR <- covered_RR %>%
+  mutate(
+    scenario   = factor(scenario, levels = c("BEFORE", "AT", "AFTER")),
+    collection = factor(collection, levels = c("full", "reduced", "stop")),
+    cutoff     = factor(
+      cutoff,
+      levels = c(27, 36, 54)
+    )
+  ) %>%
+  group_by(scenario, collection, cutoff) %>%
+  summarise(
+    coverage = mean(covered, na.rm = TRUE),
+    .groups  = "drop"
+  ) %>%
+  mutate(
+    line_id = paste(scenario, collection, sep = " • ")
+  )
+
+
+# Plot for coverage for RR
+ggplot(
+  coverage_RR,
+  aes(
+    x = coverage,
+    y = line_id,
+    color = collection
+  )
+) +
+  geom_point(size = 3) +
+  facet_wrap(~ cutoff) +
+  geom_vline(
+    xintercept = 0.95,
+    linetype = "dashed",
+    color = "grey40"
+  ) +
+  labs(
+    title = "Coverage of RR 95% confidence intervals",
+    x = "Coverage probability",
+    y = "Scenario • Collection",
+    color = "PRO data collection"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    axis.text.y = element_text(size = 9)
+  )
