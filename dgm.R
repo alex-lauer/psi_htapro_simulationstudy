@@ -4,6 +4,8 @@ library(tidyr)
 library(dplyr)
 library(purrr)
 
+set.seed(31415)
+
 # Parameters
 n_patients   <- 600         # number of patients per simulation
 n_sims       <- 200         # simulations per scenario
