@@ -109,44 +109,42 @@ collection_scenarios <- function(long_df, pro_ev_full, pd_tbl) {
     ) %>%
     select(-PD_event_week)
 
-  stop <- long_df %>%
-    distinct(patient, arm) %>%
-    left_join(pro_ev_stop, by = "patient") %>%
-    left_join(pd_tbl,      by = "patient") %>%
+
+  stop <- pd_tbl %>%
+    select(patient, arm, PD_status, PD_event_week) %>%
+    left_join(pro_ev_stop, by = c("patient", "arm")) %>%
     mutate(collection = "stop") %>%
     select(patient, arm, PRO_status, PRO_event_week,
            PD_status, PD_event_week, collection)
 
   # REDUCED scenario
+  # After PD, collect PRO approximately every 27 weeks,
+  # mapped to the next scheduled visit
 
-  # Collect PRO at every 3rd visit *after* PD
-  # Keep all visits up to and including PD_event_week
-  # After PD_event_week, keep only visits whose index distance from PD visit is a multiple of 3
   long_reduced <- long_df %>%
     left_join(pd_tbl, by = c("patient", "arm")) %>%
     group_by(patient) %>%
     mutate(
-      # Visit index per patient: 0 = baseline (week0), 1 = first post-baseline, etc.
-      visit_idx = dplyr::row_number() - 1L,
-
-      # Index of the PD detection visit on the schedule; NA if no PD
-      pd_idx = ifelse(
-        PD_status == 0,
-        NA_integer_,
-        # first index where week equals PD_event_week
-        (which(week == PD_event_week) - 1L)),
-
-      # Keep rule:
-      #  - If no PD, keep everything
-      #  - If PD occurred, keep all rows up to PD_event_week (inclusive),
-      #    and after PD keep only every 3rd visit (visit_idx - pd_idx in {3,6,9,...})
-      keep = is.na(pd_idx) |
-        (visit_idx <= pd_idx) |
-        (visit_idx > pd_idx & ((visit_idx - pd_idx) %% 3L == 0L))
+      reduced_visits = list({
+        if (PD_status[1] == 0) {
+          integer(0)
+        } else {
+          target_weeks <- PD_event_week[1] + 27 * seq_len(10)
+          sapply(target_weeks, function(tw) {
+            w <- weeks[weeks >= tw]
+            if (length(w) == 0) NA_integer_ else w[1]
+          })
+        }
+      }),
+      keep =
+        PD_status == 0 |
+        week <= PD_event_week |
+        week %in% reduced_visits[[1]]
     ) %>%
     ungroup() %>%
-    filter(keep)%>%
-    select(-visit_idx, -pd_idx, -keep)
+    filter(keep) %>%
+    select(-keep, -reduced_visits)
+
 
   # Recompute PRO event on the thinned schedule (status = 1 event, 0 no event)
   pro_reduced_ev <- compute_PRO_event(long_reduced)
@@ -168,15 +166,14 @@ collection_scenarios <- function(long_df, pro_ev_full, pd_tbl) {
     select(-last_week_reduced)
 
   # Patient-level 'reduced' dataset (merge PRO and PD event variables)
-  reduced <- long_df %>%
-    distinct(patient, arm) %>%
-    left_join(pro_reduced_ev, by = c("patient", "arm")) %>%
+  reduced <- pro_reduced_ev %>%
     left_join(pd_tbl, by = c("patient", "arm")) %>%
     transmute(
       patient, arm,
       PRO_status, PRO_event_week,
       PD_status,  PD_event_week,
-      collection = "reduced")
+      collection = "reduced"
+    )
 
   return(list(
     full    = full,

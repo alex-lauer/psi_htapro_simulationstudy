@@ -32,27 +32,28 @@ pro-simulation/
 │                                  # - relative risk at weeks 27, 36, 54
 │
 ├── performance.R                  # Performance measures of the analysis outputs. Summary accross all scenarios.
-│                                  # - geometric HR mean
-│                                  # - HR distribution (95% percentile interval)
-│                                  # - mean of median deterioration times for control and treatment
-│                                  # - plot for geometric HR mean with 2.5–97.5% percentile interval
+│                                  # - geometric HR mean with 95% CI (+plot)
+│                                  # - mean of median deterioration times for control and treatment with 95% CI
+│                                  # - N of observed events in control and treatment
 │                                  # - bias of HR means between reduced/stop and full scenarios (+plot)
-│                                  # - geometric RR means for weeks 27,36,54
-│                                  # - RR distribution (95% percentile interval)
-│                                  # - plot for geometric RR mean with 2.5–97.5% percentile interval
+│                                  # - power and coverage for HR between scenarios
+│                                  # - geometric RR means for weeks 27,36,54 with 95% CI (+plot)
+│                                  # - N of observed events in control and treatment
 │                                  # - bias of RR means between reduced/stop and full scenarios (+plot)
+│                                  # - power and coverage for RR between scenarios (+plot)
 │
 ├── checks/                        # Validity checks for the code
 │   ├── calibrate.betas.R          # Script to calibrate β1 AND β3 with a small number of simulations if beta5 is itroduced
-│   ├── calibrated_scenario_table_beta5=(-0.1) # Parameters output. A table with β1 and β3 parameters for each scenario when beta5 = -0.1.
-│   ├── calibrated_scenario_table_beta5=(-1) # Parameters output. A table with β1 and β3 parameters for each scenario when beta5 = -1.
-│   ├── dgm_copula/                # Alternative DGM where PFS and PRO at baseline are simulated using Copula and correlated (+ analysis and performance check)
-│   ├── dgm_with_beta5/            # Alternative DGM with beta 5 (PD indicator) in PRO model. If PD happened, the slope changes (+ analysis and performance check)
-│   ├── event_check/               # Calculation of N of events for specific scenarios
-│   ├── fixed_PD_check/            # Alternative DGM (first tried) where PFS is not simulated and PD events are fixed at weeks 36/54 for all patients (+ analysis and performance check)
+│   ├── calibrated_scenario_table_beta5=(-0.1).rds # Parameters output. A table with β1 and β3 parameters for each scenario when beta5 = -0.1.
+│   ├── calibrated_scenario_table_beta5=(-1).rds # Parameters output. A table with β1 and β3 parameters for each scenario when beta5 = -1.
+│   ├── dgm_copula.R               # Alternative DGM where PFS and PRO at baseline are simulated using Copula and correlated (+ analysis and performance check)
+│   ├── dgm_with_beta5.R           # Alternative DGM with beta 5 (PD indicator) in PRO model. If PD happened, the slope changes (+ analysis and performance check)
+│   ├── event_check.R              # Calculation of N of events for specific scenarios
+│   ├── fixed_PD_check.R           # Alternative DGM (first tried) where PFS is not simulated and PD events are fixed at weeks 36/54 for all patients (+ analysis and performance check)
 │   ├── km_curves.R                # KM curves for PRO and PD for one replication in one scenario
-│   ├── pro_trajectory/            # Plot for individual PRO trajectories for 1 scenario (the dataset is taken from the simulate() function)
-│   ├── uncertainty                # Comparison of 2 ways to extract CIs: empirical and from Cox PH model
+│   ├── pro_trajectory.R           # Plot for individual PRO trajectories for 1 scenario (the dataset is taken from the simulate() function)
+│   ├── required_events.R          # Function to calculated N of required events with given power and true HR
+│   ├── uncertainty.R              # Comparison of 2 ways to extract CIs: empirical and from Cox PH model
 │
 └── README                         # Explanation of project flow
 
