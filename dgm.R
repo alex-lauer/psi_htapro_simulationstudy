@@ -25,8 +25,9 @@ pro_vcov <- diag(sigma^2, nrow = 23, ncol = 23)
 pro_vcov[pro_vcov == 0] <- rho*sigma^2
 
 # Generator for expected PRO at time t
-pro_generator <- function(pro_bl_val, t, trt, beta1, beta3, beta4) {
-  pro_bl_val + (beta1 * t) + (beta3 * t * trt) + (beta4 * pro_bl_val)
+pro_generator <- function(pro_bl_val, t, trt, pro_decliner, beta1, beta3, beta4) {
+  slope <- ifelse(pro_decliner == 1, beta1 + beta3 * trt, 0)
+  pro_bl_val + (slope * t) + (beta4 * pro_bl_val)
 }
 
 # Helper to simulate PD and convert to the nearest visit week
@@ -66,6 +67,7 @@ compute_PRO_event <- function(long_df) {
   long_df %>%
     group_by(patient, arm) %>%
     summarise(
+      pro_decliner = first(pro_decliner),
       PRO_status = as.integer(any(week > 0 & PRO_change <= -10)),
       PRO_event_week = ifelse(
         PRO_status == 1,
@@ -79,12 +81,10 @@ compute_PRO_event <- function(long_df) {
 collection_scenarios <- function(long_df, pro_ev_full, pd_tbl) {
 
   # Full data collection until the end of study
-  full <- long_df %>%
-    distinct(patient, arm) %>%
-    left_join(pro_ev_full, by = "patient") %>%
-    left_join(pd_tbl, by = "patient") %>%
+  full <- pro_ev_full %>%
+    left_join(pd_tbl, by = c("patient", "arm")) %>%
     mutate(collection = "full") %>%
-    select(patient, arm, PRO_status, PRO_event_week,
+    select(patient, arm, pro_decliner, PRO_status, PRO_event_week,
            PD_status, PD_event_week, collection)
 
   # STOP scenario
@@ -109,12 +109,11 @@ collection_scenarios <- function(long_df, pro_ev_full, pd_tbl) {
     ) %>%
     select(-PD_event_week)
 
-
   stop <- pd_tbl %>%
     select(patient, arm, PD_status, PD_event_week) %>%
     left_join(pro_ev_stop, by = c("patient", "arm")) %>%
     mutate(collection = "stop") %>%
-    select(patient, arm, PRO_status, PRO_event_week,
+    select(patient, arm, pro_decliner, PRO_status, PRO_event_week,
            PD_status, PD_event_week, collection)
 
   # REDUCED scenario
@@ -145,7 +144,6 @@ collection_scenarios <- function(long_df, pro_ev_full, pd_tbl) {
     filter(keep) %>%
     select(-keep, -reduced_visits)
 
-
   # Recompute PRO event on the thinned schedule (status = 1 event, 0 no event)
   pro_reduced_ev <- compute_PRO_event(long_reduced)
 
@@ -160,8 +158,7 @@ collection_scenarios <- function(long_df, pro_ev_full, pd_tbl) {
       PRO_event_week = ifelse(
         PRO_status == 1,
         PRO_event_week,
-        last_week_reduced   # censor at last reduced-visit
-      )
+        last_week_reduced)
     ) %>%
     select(-last_week_reduced)
 
@@ -169,11 +166,10 @@ collection_scenarios <- function(long_df, pro_ev_full, pd_tbl) {
   reduced <- pro_reduced_ev %>%
     left_join(pd_tbl, by = c("patient", "arm")) %>%
     transmute(
-      patient, arm,
+      patient, arm, pro_decliner,
       PRO_status, PRO_event_week,
       PD_status,  PD_event_week,
-      collection = "reduced"
-    )
+      collection = "reduced")
 
   return(list(
     full    = full,
@@ -203,6 +199,14 @@ simulate <- function(beta1, beta3, seed) {
   pro_bl$TRT <- as.integer(pro_bl$arm == "treatment")
   pro_bl$patient <- 1:n_patients
 
+  # PRO decliner: 60% per arm decline, 40% stable
+  pro_bl <- pro_bl %>%
+    group_by(arm) %>%
+    mutate(
+      pro_decliner = rbinom(n(), size = 1, prob = 0.6)
+    ) %>%
+    ungroup()
+
   # Simulate PD
   pd_tbl <- compute_PD(pro_bl)
 
@@ -214,6 +218,7 @@ simulate <- function(beta1, beta3, seed) {
       pro_bl_val = pro_wide$PRO_baseline,
       t          = wk,
       trt        = pro_wide$TRT,
+      pro_decliner = pro_wide$pro_decliner,
       beta1      = beta1,
       beta3      = beta3,
       beta4      = beta4
@@ -227,14 +232,14 @@ simulate <- function(beta1, beta3, seed) {
     as.data.frame()
 
   # Add correlated errors to generated values of PROs
-  pro_wide_err <- pro_wide[, 5:ncol(pro_wide)] + errors
+  pro_wide_err <- pro_wide[, 6:ncol(pro_wide)] + errors
 
   # Clamp to [0, 100]
   pro_wide_err[pro_wide_err < 0] <- 0
   pro_wide_err[pro_wide_err > 100] <- 100
 
   # Recombine with patient metadata
-  pro_wide <- cbind(pro_wide[, 1:4], pro_wide_err)
+  pro_wide <- cbind(pro_wide[, 1:5], pro_wide_err)
 
   # Add week0
   pro_wide$week0 <- pro_wide$PRO_baseline
@@ -244,7 +249,7 @@ simulate <- function(beta1, beta3, seed) {
 
   # Reorder
   pro_wide <- pro_wide %>%
-    dplyr::select(patient, arm, TRT, PRO_baseline, all_of(visits))
+    dplyr::select(patient, arm, TRT, pro_decliner, PRO_baseline, all_of(visits))
 
   # Build a long dataset: one row per patient-week
   pro_long <- pro_wide %>%
