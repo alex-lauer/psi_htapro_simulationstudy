@@ -42,6 +42,8 @@ pro-simulation/
 │                                  # - bias of RR means between reduced/stop and full scenarios (+plot)
 │                                  # - power and coverage for RR between scenarios (+plot)
 │
+├── km_curves.R                    # PRO KM curves for 1st replication in every scenario (TIME x COLLECTION) for comparison
+│
 ├── checks/                        # Validity checks for the code
 │   ├── calibrate.betas.R          # Script to calibrate β1 AND β3 with a small number of simulations if beta5 is itroduced
 │   ├── calibrated_scenario_table_beta5=(-0.1).rds # Parameters output. A table with β1 and β3 parameters for each scenario when beta5 = -0.1.
@@ -50,7 +52,7 @@ pro-simulation/
 │   ├── dgm_with_beta5.R           # Alternative DGM with beta 5 (PD indicator) in PRO model. If PD happened, the slope changes (+ analysis and performance check)
 │   ├── event_check.R              # Calculation of N of events for specific scenarios
 │   ├── fixed_PD_check.R           # Alternative DGM (first tried) where PFS is not simulated and PD events are fixed at weeks 36/54 for all patients (+ analysis and performance check)
-│   ├── km_curves.R                # KM curves for PRO and PD for one replication in one scenario
+│   ├── km_curves_checks.R                # KM curves for PRO and PD for one replication in one scenario
 │   ├── pro_trajectory.R           # Plot for individual PRO trajectories for 1 scenario (the dataset is taken from the simulate() function)
 │   ├── required_events.R          # Function to calculated N of required events with given power and true HR
 │   ├── uncertainty.R              # Comparison of 2 ways to extract CIs: empirical and from Cox PH model
