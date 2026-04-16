@@ -1,9 +1,12 @@
 library(survival)
 library(survminer)
 library(patchwork)
+library(dplyr)
 
 scenario_names   <- names(sim_out)
 collection_types <- c("full", "stop", "reduced")
+
+#### PRO KM curves per scenario ####
 
 pro_km_plots <- list()
 
@@ -17,9 +20,7 @@ for (scn in scenario_names) {
 
     message("Scenario = ", scn, " | Collection = ", coltype)
 
-    # ----------------------------------
     # PRO Kaplan–Meier
-    # ----------------------------------
     surv_obj_pro <- Surv(
       dat_check$PRO_event_week,
       dat_check$PRO_status
@@ -30,9 +31,7 @@ for (scn in scenario_names) {
       data = dat_check
     )
 
-    # ----------------------------------
     # HR
-    # ----------------------------------
     cox_pro <- coxph(
       Surv(PRO_event_week, PRO_status) ~ arm,
       data = dat_check
@@ -41,9 +40,7 @@ for (scn in scenario_names) {
     HR_pro <- exp(coef(cox_pro))
     CI_pro <- exp(confint(cox_pro))
 
-    # ----------------------------------
     # Medians
-    # ----------------------------------
     sf_pro <- summary(
       survfit(
         Surv(PRO_event_week, PRO_status) ~ arm,
@@ -54,15 +51,11 @@ for (scn in scenario_names) {
     median_ctrl_pro <- sf_pro$table["arm=control",   "median"]
     median_trt_pro  <- sf_pro$table["arm=treatment", "median"]
 
-    # ----------------------------------
     # Event counts
-    # ----------------------------------
     n_event_ctrl_pro <- sum(dat_check$PRO_status[dat_check$arm == "control"])
     n_event_trt_pro  <- sum(dat_check$PRO_status[dat_check$arm == "treatment"])
 
-    # ----------------------------------
     # KM plot
-    # ----------------------------------
     km_obj <- ggsurvplot(
       fit_pro,
       data = dat_check,
@@ -73,12 +66,9 @@ for (scn in scenario_names) {
       title = paste(scn, "•", coltype),
       legend.title = "Arm",
       legend.labs = c("Control", "Treatment")
-    #  palette = c("grey40", "#D55E00")
     )
 
-    # ----------------------------------
     # Annotate plot
-    # ----------------------------------
     pro_km_plots[[paste(scn, coltype, sep = "_")]] <-
       km_obj$plot +
       annotate(
@@ -97,9 +87,7 @@ for (scn in scenario_names) {
   }
 }
 
-# ----------------------------------
 # Combine ALL 9 PRO KM plots
-# ----------------------------------
 combined_PRO_KM <-
   (pro_km_plots$BEFORE_full    | pro_km_plots$BEFORE_stop    | pro_km_plots$BEFORE_reduced) /
   (pro_km_plots$AT_full        | pro_km_plots$AT_stop        | pro_km_plots$AT_reduced) /
@@ -120,9 +108,8 @@ print(combined_PRO_KM)
 
 
 
-# PD KM curve (always the same)
-
-# PD Kaplan–Meier
+#### PD KM curve ####
+# The same across scenarios
 
 dat_check <- sim_out[["AT"]][[1]][["full"]]
 
@@ -187,3 +174,53 @@ print(pd_km$plot +
       "Events C = ", n_event_ctrl_pd,
       " | Events T = ", n_event_trt_pd),
     size = 4))
+
+
+
+
+#### PD medians accross scenarios ####
+compute_PD_median <- function(dat) {
+
+  sf_pd <- summary(
+    survfit(
+      Surv(PD_event_week, PD_status) ~ arm,
+      data = dat
+    )
+  )
+
+  tibble(
+    arm = c("control", "treatment"),
+    median_PD = c(
+      sf_pd$table["arm=control",   "median"],
+      sf_pd$table["arm=treatment", "median"]
+    )
+  )
+}
+
+PD_medians_long <- purrr::imap_dfr(
+  sim_out,
+  function(sim_list, scenario) {
+
+    purrr::imap_dfr(
+      sim_list,
+      function(res, sim_id) {
+
+        dat_check <- res$full
+
+        compute_PD_median(dat_check) %>%
+          mutate(
+            scenario = scenario,
+            sim      = sim_id
+          )
+      }
+    )
+  }
+)
+
+PD_medians_summary <- PD_medians_long %>%
+  group_by(scenario, arm) %>%
+  summarise(
+    median_PD = median(median_PD, na.rm = TRUE),
+    mean_PD   = mean(median_PD, na.rm = TRUE),
+    .groups   = "drop"
+  )
