@@ -24,12 +24,12 @@ pro-simulation/
 │
 ├── analysis.R                     # Analysis of simulated datasets. Analysis models:
 │   ├── run_cox                    # - Cox PH
-│   ├── run_rr                     # - Poisson log-link
+│   ├── run_rr                     # - Response at landmark timpoints
 │   ├── analysis_results           # - creation of an output table
 │
 ├── analysis_results.rds           # Analysis output. A table with 1,800 entries (3 TIME scenarios x 200 simulations x 3 COLLECTION scenarios)
 │                                  # - hazard ratios and median time to deterioration
-│                                  # - relative risk at weeks 27, 36, 54
+│                                  # - risk difference at weeks 27, 36, 54
 │
 ├── performance.R                  # Performance measures of the analysis outputs. Summary accross all scenarios.
 │                                  # - geometric HR mean with 95% CI (+plot)
@@ -37,10 +37,10 @@ pro-simulation/
 │                                  # - N of observed events in control and treatment
 │                                  # - bias of HR means between reduced/stop and full scenarios (+plot)
 │                                  # - power and coverage for HR between scenarios
-│                                  # - geometric RR means for weeks 27,36,54 with 95% CI (+plot)
+│                                  # - risk difference (RD) means for weeks 27,36,54 with 95% CI (+plot)
 │                                  # - N of observed events in control and treatment
-│                                  # - bias of RR means between reduced/stop and full scenarios (+plot)
-│                                  # - power and coverage for RR between scenarios (+plot)
+│                                  # - bias of RD means between reduced/stop and full scenarios (+plot)
+│                                  # - power and coverage for RD between scenarios (+plot)
 │
 ├── km_curves.R                    # PRO KM curves for 1st replication in every scenario (TIME x COLLECTION) for comparison
 │

@@ -63,7 +63,7 @@ run_cox <- function(dat) {
   )
 }
 
-# Risk Ratio at fixed week (27, 36, 54)
+# Risk Difference at fixed week (27, 36, 54)
 run_rr <- function(dat, cutoff_week) {
 
   # Define event by time cutoff
